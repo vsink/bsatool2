@@ -153,7 +153,8 @@ type (
 		AnnSeqLen        int
 		AnnShowFileName  bool
 		AnnPosFile       string
-		AnnMinPosNbr     int
+		AnnMinPos        int
+		AnnMaxPos        int
 		AnnAltRange      string
 
 		StatDB         string
@@ -194,6 +195,7 @@ type (
 		InfoCodons          string
 		InfoShowAs          string
 		InfoMask            string
+		InfoReplace         string
 		InfoFlankLeft       int
 		InfoFlankRight      int
 		InfoIUPAc           bool
@@ -213,6 +215,7 @@ type (
 		PileupCircos  bool
 		PileupDB      string
 		PileupMinLen  int
+		Version       string
 	}
 	AltStringResult struct {
 		Start, End                   int

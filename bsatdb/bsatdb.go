@@ -13,6 +13,7 @@ import (
 	"compress/lzw"
 	"encoding/gob"
 	"fmt"
+	"github.com/pterm/pterm"
 	"io"
 	"log"
 	// "bytes"
@@ -26,21 +27,21 @@ import (
 )
 
 var (
-	logoLoc = `
- _______    ________     __  ___________  ______      ______    ___       
-|   _  "\  /"       )   /""\("     _   ")/    " \    /    " \  |"  |      
-(. |_)  :)(:   \___/   /    \)__/  \\__/// ____  \  // ____  \ ||  |      
-|:     \/  \___  \    /' /\  \  \\_ /  /  /    ) :)/  /    ) :)|:  |      
-(|  _  \\   __/  \\  //  __'  \ |.  | (: (____/ //(: (____/ //  \  |___   
-|: |_)  :) /" \   :)/   /  \\  \\:  |  \        /  \        /  ( \_|:  \  
-(_______/ (_______/(___/    \___)\__|   \"_____/    \"_____/    \_______) 
-` +
-		`BSATool - Bacterial Snp Annotation Tool ` + "\n" +
-		`      Laboratory of Social and Epidemic Infections
- Scientific Centre for Family Health and Human Reproduction Problems
-     	(c) V.Sinkov, Irkutsk, Russia, 2017-2022                                   
-                                                  
-	`
+	// 	logoLoc = `
+	//  _______    ________     __  ___________  ______      ______    ___
+	// |   _  "\  /"       )   /""\("     _   ")/    " \    /    " \  |"  |
+	// (. |_)  :)(:   \___/   /    \)__/  \\__/// ____  \  // ____  \ ||  |
+	// |:     \/  \___  \    /' /\  \  \\_ /  /  /    ) :)/  /    ) :)|:  |
+	// (|  _  \\   __/  \\  //  __'  \ |.  | (: (____/ //(: (____/ //  \  |___
+	// |: |_)  :) /" \   :)/   /  \\  \\:  |  \        /  \        /  ( \_|:  \
+	// (_______/ (_______/(___/    \___)\__|   \"_____/    \"_____/    \_______)
+	// ` +
+	// 		`BSATool - Bacterial Snp Annotation Tool ` + "\n" +
+	// 		`      Laboratory of Social and Epidemic Infections
+	//  Scientific Centre for Family Health and Human Reproduction Problems
+	//      	(c) V.Sinkov, Irkutsk, Russia, 2017-2022
+	//
+	// 	`
 	genomeSeqSlice  []string // информация об генах, загруженная из базы
 	gInfo           bsatstruct.GenomeInfo
 	geneCoordinates = make(map[string]bsatstruct.GCoords)
@@ -91,7 +92,7 @@ func LoadDB(file string) {
 
 }
 
-func parseGeneBankFile(file string) (GenomeData []bsatstruct.GeneInfo, GenomeSplice []string) {
+func parseGBFile(file string) (GenomeData []bsatstruct.GeneInfo, GenomeSplice []string) {
 	// функция для считывания файла в формате генбанка и занесения строк в массив linesFromGB
 
 	var (
@@ -120,7 +121,19 @@ func parseGeneBankFile(file string) (GenomeData []bsatstruct.GeneInfo, GenomeSpl
 		noteBuffer                               strings.Builder
 	)
 
-	fmt.Println(logoLoc)
+	pterm.DefaultCenter.Println("\n")
+	s, _ := pterm.DefaultBigText.WithLetters(pterm.NewLettersFromString("BSATool")).Srender()
+	pterm.DefaultCenter.Println(s) // Print BigLetters with the default CenterPrinter
+	pterm.DefaultCenter.WithCenterEachLineSeparately().Println(
+		"-= BSATool - Bacterial Snp Annotation Tool =-\nThe Laboratory of Social and Epidemic Infections\nThe Group of Genomic Research and"+
+			" Bioinformatics\nScientific Centre for Family"+
+			" Health"+
+			" and Human"+
+			" Reproduction"+
+			" Problems\n(c) V.Sinkov, Irkutsk, Russia, 2017-2022\nVersion:", bsatstruct.Flag.Version)
+
+	// Print a customized list with different styles and levels.
+
 	f, err := os.Open(file) // открываем файл
 
 	if err != nil {
@@ -418,7 +431,7 @@ func parseGeneBankFile(file string) (GenomeData []bsatstruct.GeneInfo, GenomeSpl
 	}
 
 	for key, val := range cdsCount {
-		fmt.Printf("\nFound: %v %v", val, key)
+		fmt.Printf("\nFound %v %v,", val, key)
 	}
 	if nucCore == 0 {
 		fmt.Println("\nGene Info: Genbank Id Nomenclature", nucCore)
@@ -459,7 +472,7 @@ func parseGeneBankFile(file string) (GenomeData []bsatstruct.GeneInfo, GenomeSpl
 		}
 
 	}
-	fmt.Println("Found IGR regions:", igrCount)
+	fmt.Printf("Found %v IGR regions\n", igrCount)
 
 	sort.Slice(
 		GenomeData, func(i, j int) bool {
@@ -498,12 +511,12 @@ func writeDB(file string, gene []bsatstruct.GeneInfo) {
 	_ = gobParser.Encode(&gInfo)
 	_ = gobParser.Encode(&geneCoordinates)
 
-	fmt.Println(file, " was created successfully.")
+	pterm.Success.Printf("%v was created successfully\n", file)
 
 }
 
 func CreateDB(gbFile string, dbName string) {
-	allGenesVal, genomeSeqSlice = parseGeneBankFile(gbFile)
+	allGenesVal, genomeSeqSlice = parseGBFile(gbFile)
 
 	writeDB(dbName, allGenesVal)
 }

@@ -49,12 +49,13 @@ func LoadExclGenes(file string) map[int]int {
 		scanTxt := scanner.Text()
 
 		for _, exGene := range exLocus.FindAllStringSubmatch(scanTxt, -1) {
-			start, end = bsatseq.GetGenePosByName(exGene[0])
+			start, end = bsatservice.GetGenePosByName(exGene[0])
 
 			exGenes[start] = end
 
 		}
 	}
+
 	return exGenes
 }
 
@@ -174,11 +175,18 @@ func CheckSNPfromFile(f string, verbose bool, web bool, useRule bool) {
 		snpPosFound[file] = make(map[int]int)
 		snpPNAFound[file] = make(map[int]int)
 
-		qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
-		go qSNP.Request()
+		// qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
+		// go qSNP.Request()
+		//
+		// snpRes := <-qSNP.OutChan
+		// bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// snpsChan := make(chan []bsatstruct.SnpInfo)
 
-		snpRes := <-qSNP.OutChan
-		bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// go func() {
+		// 	snpsChan <- bsatvcf.GetSNPList(file)
+		// }()
+		snpsRes := bsatvcf.GetSNPList(file)
+		bsatstruct.SnpCacheMap[file] = snpsRes
 
 	}
 
@@ -373,7 +381,7 @@ func CheckSNPfromFile(f string, verbose bool, web bool, useRule bool) {
 							strings.ToUpper(mutationAlt)))
 
 					if lAPos == snpFromFile.APos && strings.ToUpper(val.Alt) == strings.ToUpper(snpFromFile.Alt) || lAPos == snpFromFile.APos && strings.
-						ToUpper(bsatseq.MakeComplementSeq(val.Alt)) == strings.ToUpper(snpFromFile.Alt) && snpFromFile.Direction == "r" {
+						ToUpper(bsatservice.GetComplement(val.Alt)) == strings.ToUpper(snpFromFile.Alt) && snpFromFile.Direction == "r" {
 
 						if snpPosFound[file][mutationPos] == 0 {
 							mapofSNP[file] = append(
@@ -411,7 +419,7 @@ func CheckSNPfromFile(f string, verbose bool, web bool, useRule bool) {
 						}
 
 					} else if lAPos == snpFromFile.APos && strings.ToUpper(val.Alt) != strings.ToUpper(snpFromFile.Alt) || lAPos == snpFromFile.
-						APos && strings.ToUpper(bsatseq.MakeComplementSeq(val.Alt)) != strings.ToUpper(snpFromFile.Alt) && snpFromFile.Direction == "r" {
+						APos && strings.ToUpper(bsatservice.GetComplement(val.Alt)) != strings.ToUpper(snpFromFile.Alt) && snpFromFile.Direction == "r" {
 
 						if snpPosFound[file][mutationPos] == 0 {
 							mapofSNP[file] = append(
@@ -647,6 +655,7 @@ func LoadExclRegion(file string) map[int]int {
 
 		}
 	}
+
 	return exGenes
 }
 
@@ -661,7 +670,7 @@ func ExclGeneByPos(file string) map[int]int {
 	for _, val := range locSNPcheck {
 		snpPos, _ = strconv.Atoi(val.APos)
 
-		start, end := bsatseq.GetGeneNameCoordsByApos(snpPos)
+		start, end := bsatservice.GetGeneNameCoordsByApos(snpPos)
 		if start != 0 && end != 0 {
 
 			exGenes[start] = end
@@ -740,11 +749,14 @@ func CheckRuleFromFile(file string) (rules []bsatstruct.RulesInfo) {
 
 }
 
-func AnnotateFromList(file string, genes []bsatstruct.GeneInfo) {
+func AnnotFromFile(file string, genes []bsatstruct.GeneInfo) {
 
 	var (
-		posAlt = regexp.MustCompile(`^(\d+)\W+(\w)\W+(\w)`)
-		snp    bsatstruct.SnpInfo
+		posAlt    = regexp.MustCompile(`^(\d+)\W+(\w)\W+(\w)`)
+		direction string
+		// altPositions = make(map[string][]bsatstruct.AllPositionsInGene)
+		// locus        string
+		// snp    bsatstruct.SnpInfo
 	)
 	f, err := os.Open(file) // открываем файл
 
@@ -762,7 +774,8 @@ func AnnotateFromList(file string, genes []bsatstruct.GeneInfo) {
 	scanner := bufio.NewScanner(f) //  новый сканер
 
 	for scanner.Scan() {
-		for _, findPosAlt := range posAlt.FindAllStringSubmatch(scanner.Text(), -1) {
+		// fmt.Println(scanner.Text())
+		for _, findPosAlt := range posAlt.FindAllStringSubmatch(strings.TrimLeft(scanner.Text(), " "), -1) {
 
 			if len(findPosAlt) == 4 {
 
@@ -772,22 +785,52 @@ func AnnotateFromList(file string, genes []bsatstruct.GeneInfo) {
 
 					alt := findPosAlt[3]
 					ref := findPosAlt[2]
+
 					if apos >= genes[z].Start && apos <= genes[z].End {
-						qSnpInfo := &bsatvcf.SnpInfoQuery{OutChan: make(chan bsatstruct.SnpInfo), Apos: apos, G: genes[z], Alt: alt, Index: false}
-						go qSnpInfo.Request()
-						snp = <-qSnpInfo.OutChan
-						if strings.ToUpper(ref) == strings.ToUpper(snp.NucInGenomeRef) {
-
-							fmt.Printf(
-								"%v\t%v\t%v%v>%v\t%v/%v\t%v%v%v\t%v\t%v\n", snp.Locus, snp.APos, snp.PosInGene, snp.NucInPosCoding, snp.Alt, snp.RefCodon,
-								snp.AltCodon, snp.RefAAShort, snp.CodonNbrInG, snp.AltAAShort, snp.Mutation, snp.Product)
+						// qSnpInfo := &bsatvcf.SnpInfoQuery{OutChan: make(chan bsatstruct.SnpInfo), Apos: apos, G: genes[z], Alt: alt, Index: false}
+						// go qSnpInfo.Request()
+						// snp = <-qSnpInfo.OutChan
+						snp := bsatvcf.GetSNPInfoList(apos, genes[z], alt)
+						// snpsChan := make(chan []bsatstruct.SnpInfo)
+						//
+						// go func() {
+						// 	snpsChan <- bsatvcf.GetSNPList(file)
+						// }()
+						// snpsRes := <-snpsChan
+						if snp.Direction == "f" {
+							direction = "->"
 						} else {
+							direction = "<-"
+						}
 
+						// refS := bsatseq.GetGeneSeq(snp.Locus)
+
+						// altPositions[snp.Locus] = append(
+						// 	altPositions[snp.Locus], bsatstruct.AllPositionsInGene{Pos: snp.PosInGene, Alt: snp.Alt, Ref: snp.NucInPosCoding, Locus: snp.Locus})
+						//
+						// locus = snp.Locus
+						// locResToExport=bsatstruct.SnpInfoExport{Locus: snp.Locus,APos: snp.APos,PosInGene: snp.PosInGene,PosInCodonG: snp.PosInCodonG,
+						// 	GeneLen: snp.GeneLen,Start: snp.Start,End: snp.End,NucCore: snp.NucCore,TangIdxVal: snp.TangIdxVal,DP:snp.DP,Indel: snp.Indel,
+						// 	RefCodon: snp.RefCodon,AltCodon: snp.AltCodon,RefAA: snp.RefAA,AltAA: snp.AltAA,Direction: snp.Direction,
+						// 	NucInPosCoding: snp.NucInPosCoding,NucInGenomeRef: snp.NucInGenomeRef, NucInGenomeAlt: snp.NucInGenomeAlt,Product: snp.Product,
+						// 	Name: snp.Name,RefAAShort: snp.RefAAShort,AltAAShort: snp.AltAAShort,Mutation: snp.Mutation,Tang: snp.Tang,Alt: snp.Alt,
+						// 	Note: snp.Note,ReportType: snp.ReportType,TiTv: snp.TiTv,TypeOf: snp.TypeOf,ComplexIndex: snp.ComplexIndex,FName: snp.FName,
+						// 	IndelType: snp.IndelType,IndelRef: snp.IndelRef, IndelAlt: snp.IndelAlt,RefSeq:refS, AltSeq: altS}
+						if strings.ToUpper(ref) == strings.ToUpper(snp.NucInGenomeRef) {
+							// bsatservice.PrintInConsole(snp, false)
 							fmt.Printf(
-								"%v\t%v\t%v[%v]>%v\t%v/%v\t%v%v%v\t%v\t%v\n", snp.Locus, snp.APos, snp.PosInGene, snp.NucInPosCoding,
+								"%v\t%v\t%v%v>%v\t%v/%v\t%v%v%v\t%v\t%v\t%v\n", snp.Locus, snp.APos, snp.PosInGene, snp.NucInPosCoding, snp.Alt, snp.RefCodon,
+								snp.AltCodon, snp.RefAAShort, snp.CodonNbrInG, snp.AltAAShort, snp.Mutation, direction, snp.Product)
+						} else {
+							if snp.Direction == "r" {
+								ref = bsatservice.GetRevComplement(ref)
+							}
+							// bsatservice.PrintInConsole(snp, false)
+							fmt.Printf(
+								"%v\t%v\t%v[%v]>%v\t%v/%v\t%v%v%v\t%v\t%v\t%v\n", snp.Locus, snp.APos, snp.PosInGene, ref,
 								snp.Alt,
 								snp.RefCodon,
-								snp.AltCodon, snp.RefAAShort, snp.CodonNbrInG, snp.AltAAShort, snp.Mutation, snp.Product)
+								snp.AltCodon, snp.RefAAShort, snp.CodonNbrInG, snp.AltAAShort, snp.Mutation, direction, snp.Product)
 						}
 
 					}
@@ -797,10 +840,16 @@ func AnnotateFromList(file string, genes []bsatstruct.GeneInfo) {
 
 		}
 	}
+	// refSNuc := bsatseq.GetGeneSeq(locus)
+	// // 2289292,2288607
+	// // test:= bsatseq.MakeAltStringByPos(2289292,2288607,)
+	// altSNuc := bsatseq.MakeAltString(locus, altPositions[locus], false)
+	// altSDot := bsatseq.MakeAltString(locus, altPositions[locus], true)
+	// fmt.Printf(">%v Reference\n%v\n>%v Alternative\n%v\n>%v SNP\n%v\n", file, refSNuc, file, altSNuc, file, altSDot)
 
 }
 
-func CalcComplexIdxFromFile(file string) {
+func CalcCIdxFromFile(file string) {
 
 	f, err := os.Open(file) // открываем файл
 
@@ -897,6 +946,7 @@ func FilterVcf(f string, dpFilter int) {
 				dp, _ := strconv.Atoi(match[4])
 
 				if dp >= dpFilter {
+					// fmt.Println(dp)
 					_, _ = fmt.Fprintln(fOut, scanner.Text())
 				}
 
@@ -908,11 +958,108 @@ func FilterVcf(f string, dpFilter int) {
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
-	_ = os.Rename(f, fmt.Sprintf("%v.bak", f))
-	_ = os.Rename("tmp", f)
+	// _ = os.Rename(f, fmt.Sprintf("%v.dp%v.filtred", f, dpFilter))
+	_ = os.Rename("tmp", fmt.Sprintf("%v.dp%v.filtred", f, dpFilter))
 
 }
 
+func DPmap(f string, allGenes []string) {
+	var (
+		vcf = regexp.MustCompile(`^\S+\s+(\d+)\W+(\w+)\s+(\w+).*DP=(\d+)`)
+
+		validateVCF = regexp.MustCompile(`(##fileformat)=VCF`)
+		// vcfSpecialInfo = regexp.MustCompile(`(##.*)`)
+		posInGene = make(map[string][]int)
+		dpInGene  = make(map[string][]int)
+		vcfValid  bool
+	)
+
+	file, err := os.Open(f)
+	if err != nil {
+		log.Fatal(f, err.Error())
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Fatal(f, err.Error())
+		}
+	}(file)
+
+	// fOut, err := os.Create("tmp")
+	// if err != nil {
+	// 	log.Fatal("Cannot create file", err.Error())
+	// }
+	// defer func(fOut *os.File) {
+	// 	err := fOut.Close()
+	// 	if err != nil {
+	// 		log.Fatal(f, err.Error())
+	// 	}
+	// }(fOut)
+	fmt.Printf("\n---- %v -----\n", f)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+
+		for _, vcfvalid := range validateVCF.FindAllStringSubmatch(scanner.Text(), -1) {
+
+			if vcfvalid[0] == "##fileformat=VCF" {
+				vcfValid = true
+			}
+
+		}
+
+		// for _, scpecInfo := range vcfSpecialInfo.FindAllStringSubmatch(scanner.Text(), -1) {
+		//
+		// 	_, _ = fmt.Fprintln(fOut, scpecInfo[0])
+		//
+		// }
+		if vcfValid == false {
+			fmt.Printf("\n%v is not VCF file!!! Check it!\n", file.Name())
+			break
+		}
+		if bsatstruct.Flag.GbInDel == true {
+
+		}
+
+		for _, match := range vcf.FindAllStringSubmatch(scanner.Text(), -1) {
+
+			if vcfValid == true {
+
+				dp, _ := strconv.Atoi(match[4])
+				apos, _ := strconv.Atoi(match[1])
+				gname, _ := bsatservice.GetGeneNameByPos(apos, apos)
+				posInGene[gname] = append(posInGene[gname], apos)
+				dpInGene[gname] = append(dpInGene[gname], dp)
+
+				// fmt.Printf("%v\t%v\t%v\n", apos, dp, gname)
+				// if dp >= dpFilter {
+				// 	fmt.Println(dp)
+				// 	_, _ = fmt.Fprintln(fOut, scanner.Text())
+				// }
+
+			}
+		}
+
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	for _, val := range allGenes {
+		gstart, gend := bsatservice.GetGenePosByName(val)
+		if len(posInGene[val]) == 0 {
+			fmt.Printf("%v\t%v\t%v\t-\t-\n", gstart, gend, val)
+		} else {
+			fmt.Printf("%v\t%v\t%v\t%v\t%v\n", gstart, gend, val, posInGene[val], dpInGene[val])
+		}
+
+	}
+
+	fmt.Printf("end\n---- %v -----\n", f)
+	// _ = os.Rename(f, fmt.Sprintf("%v.dp%v.filtred", f, dpFilter))
+	// _ = os.Rename("tmp", f)
+
+}
 func CheckPosList(file string) {
 	var (
 		posInGene   int
@@ -939,20 +1086,20 @@ func CheckPosList(file string) {
 
 		scanTxt := scanner.Text()
 		if pos, err := strconv.Atoi(scanTxt); err == nil {
-			locus, _ := bsatseq.GetGeneNameByPos(pos, pos)
-			prod := bsatseq.GetProdByName(locus)
-			start, end := bsatseq.GetGenePosByName(locus)
+			locus, _ := bsatservice.GetGeneNameByPos(pos, pos)
+			prod := bsatservice.GetProdByName(locus)
+			start, end := bsatservice.GetGenePosByName(locus)
 
-			if bsatseq.GetDirectByName(locus) == "f" {
-				refNuc = bsatseq.GetNucFromGenomePos(pos)
+			if bsatservice.GetDirectByName(locus) == "f" {
+				refNuc = bsatservice.GetNucFromGenomePos(pos)
 				posInGene = (pos - start) + 1
-				seq = bsatseq.GetNucFromGenome(start, end)
+				seq = bsatservice.GetNucFromGenome(start, end)
 				seqArr = strings.Split(seq, "")
 				seqArr[posInGene-1] = fmt.Sprintf("\n[%v/%v]\n", seqArr[posInGene-1], refNuc)
-			} else if bsatseq.GetDirectByName(locus) == "r" {
-				refNuc = bsatseq.MakeComplementSeq(bsatseq.GetNucFromGenomePos(pos))
+			} else if bsatservice.GetDirectByName(locus) == "r" {
+				refNuc = bsatservice.GetComplement(bsatservice.GetNucFromGenomePos(pos))
 				posInGene = (end - pos) + 1
-				seq = bsatseq.MakeRevComplement(bsatseq.GetNucFromGenome(start, end))
+				seq = bsatservice.GetRevComplement(bsatservice.GetNucFromGenome(start, end))
 				seqArr = strings.Split(seq, "")
 				seqArr[posInGene-1] = fmt.Sprintf("\n%v(%v)[%v|%v]\n", pos, posInGene, seqArr[posInGene-1], refNuc)
 			}
@@ -1002,13 +1149,13 @@ func CheckPosListVCF(fileUniq string, makeSeq bool) {
 		if pos, err := strconv.Atoi(posfromfile); err == nil {
 			for _, file := range *files {
 
-				snpsChan := make(chan []bsatstruct.SnpInfo)
-
-				go func() {
-					snpsChan <- bsatvcf.MakeSnps(file)
-				}()
-				snps := <-snpsChan
-
+				// snpsChan := make(chan []bsatstruct.SnpInfo)
+				//
+				// go func() {
+				// 	snpsChan <- bsatvcf.GetSNPList(file)
+				// }()
+				// snps := <-snpsChan
+				snps := bsatvcf.GetSNPList(file)
 				for _, val := range snps {
 
 					if val.APos == pos {
@@ -1046,25 +1193,25 @@ func CheckPosListVCF(fileUniq string, makeSeq bool) {
 
 				direction := foundPos[key].Direction
 				locus = foundPos[key].Locus
-				start, end := bsatseq.GetGenePosByName(locus)
-				prod := bsatseq.GetProdByName(locus)
+				start, end := bsatservice.GetGenePosByName(locus)
+				prod := bsatservice.GetProdByName(locus)
 
 				if direction == "f" {
 					if bsatstruct.Flag.StatFlankLeft != 0 {
 						leftPos := start - bsatstruct.Flag.StatFlankLeft
-						leftFlankSeq = bsatseq.GetNucFromGenome(leftPos, end)
+						leftFlankSeq = bsatservice.GetNucFromGenome(leftPos, end)
 						leftFlankDescr = fmt.Sprintf("+left=%v", bsatstruct.Flag.StatFlankLeft)
 					}
 					if bsatstruct.Flag.StatFlankRight != 0 {
 						rightPos := end + bsatstruct.Flag.StatFlankLeft
-						rightFlankSeq = bsatseq.GetNucFromGenome(start, rightPos)
+						rightFlankSeq = bsatservice.GetNucFromGenome(start, rightPos)
 						rightFlankDescr = fmt.Sprintf("+right=%v", bsatstruct.Flag.StatFlankRight)
 					}
 					refNuc = foundPos[key].NucInPosCoding
 					posInGene = (key - start) + 1
 					altNuc = foundPos[key].Alt
 					// posInGeneT := foundPos[key].PosInGene
-					seq = bsatseq.GetNucFromGenome(start, end)
+					seq = bsatservice.GetNucFromGenome(start, end)
 					seqArr = strings.Split(seq, "")
 					seqArr[posInGene-1] = fmt.Sprintf("\n[%v/%v]\n", refNuc, altNuc)
 					locusDescr = fmt.Sprintf(
@@ -1074,18 +1221,18 @@ func CheckPosListVCF(fileUniq string, makeSeq bool) {
 				} else if direction == "r" && bsatstruct.Flag.StatReverse == true {
 					if bsatstruct.Flag.StatFlankLeft != 0 {
 						rightPos := end + bsatstruct.Flag.StatFlankLeft
-						rightFlankSeq = bsatseq.MakeRevComplement(bsatseq.GetNucFromGenome(end, rightPos))
+						rightFlankSeq = bsatservice.GetRevComplement(bsatservice.GetNucFromGenome(end, rightPos))
 						leftFlankDescr = fmt.Sprintf("+c_left=%v", bsatstruct.Flag.StatFlankLeft)
 					}
 					if bsatstruct.Flag.StatFlankRight != 0 {
 						leftPos := start - bsatstruct.Flag.StatFlankLeft
-						leftFlankSeq = bsatseq.MakeRevComplement(bsatseq.GetNucFromGenome(leftPos, start))
+						leftFlankSeq = bsatservice.GetRevComplement(bsatservice.GetNucFromGenome(leftPos, start))
 						rightFlankDescr = fmt.Sprintf("+c_right=%v", bsatstruct.Flag.StatFlankRight)
 					}
 					refNuc = foundPos[key].NucInPosCoding
 					altNuc = foundPos[key].Alt
 					posInGene = (end - key) + 1
-					seq = bsatseq.MakeRevComplement(bsatseq.GetNucFromGenome(start, end))
+					seq = bsatservice.GetRevComplement(bsatservice.GetNucFromGenome(start, end))
 					seqArr = strings.Split(seq, "")
 
 					seqArr[posInGene-1] = fmt.Sprintf("\n[%v/%v]\n", refNuc, altNuc)
@@ -1097,19 +1244,19 @@ func CheckPosListVCF(fileUniq string, makeSeq bool) {
 				} else if direction == "r" && bsatstruct.Flag.StatReverse == false {
 					if bsatstruct.Flag.StatFlankLeft != 0 {
 						leftPos := start - bsatstruct.Flag.StatFlankLeft
-						leftFlankSeq = bsatseq.GetNucFromGenome(leftPos, end)
+						leftFlankSeq = bsatservice.GetNucFromGenome(leftPos, end)
 						leftFlankDescr = fmt.Sprintf("+left=%v", bsatstruct.Flag.StatFlankLeft)
 					}
 					if bsatstruct.Flag.StatFlankRight != 0 {
 						rightPos := end + bsatstruct.Flag.StatFlankLeft
-						rightFlankSeq = bsatseq.GetNucFromGenome(start, rightPos)
+						rightFlankSeq = bsatservice.GetNucFromGenome(start, rightPos)
 						rightFlankDescr = fmt.Sprintf("+right=%v", bsatstruct.Flag.StatFlankRight)
 					}
-					refNuc = bsatseq.MakeRevComplement(foundPos[key].NucInPosCoding)
+					refNuc = bsatservice.GetRevComplement(foundPos[key].NucInPosCoding)
 					posInGene = (end - key) + 1
-					altNuc = bsatseq.MakeRevComplement(foundPos[key].Alt)
+					altNuc = bsatservice.GetRevComplement(foundPos[key].Alt)
 					// posInGeneT := foundPos[key].PosInGene
-					seq = bsatseq.GetNucFromGenome(start, end)
+					seq = bsatservice.GetNucFromGenome(start, end)
 					seqArr = strings.Split(seq, "")
 					seqArr[posInGene-1] = fmt.Sprintf("\n[%v/%v]\n", refNuc, altNuc)
 					locusDescr = fmt.Sprintf(
@@ -1162,17 +1309,17 @@ func MakeSeqFromSNPListFile(f string) {
 			snpCheck := <-snpCheckChan
 			if snpCheck.Locus == "" {
 				aposInt, _ := strconv.Atoi(snpCheck.APos)
-				locName, _ := bsatseq.GetGeneNameByPos(aposInt, aposInt)
+				locName, _ := bsatservice.GetGeneNameByPos(aposInt, aposInt)
 				snpCheck.Locus = locName
 			}
 
 			if snpCheck.Locus != "" {
 
-				dir := bsatseq.GetDirectByName(snpCheck.Locus)
+				dir := bsatservice.GetDirectByName(snpCheck.Locus)
 
 				seq = bsatseq.GetGeneSeq(snpCheck.Locus)
 
-				prod := bsatseq.GetProdByName(snpCheck.Locus)
+				prod := bsatservice.GetProdByName(snpCheck.Locus)
 				seqArr := strings.Split(seq, "")
 				posInGene, _ := strconv.Atoi(snpCheck.PosInGene)
 				for i := 0; i < len(seqArr); i++ {
@@ -1184,7 +1331,7 @@ func MakeSeqFromSNPListFile(f string) {
 						if dir == "f" {
 							seqArr[i] = fmt.Sprintf("[%v>%v]", strings.ToUpper(seqArr[i]), snpCheck.Alt)
 						} else if dir == "r" {
-							seqArr[i] = fmt.Sprintf("[%v>%v]", strings.ToUpper(seqArr[i]), bsatseq.MakeComplementSeq(snpCheck.Alt))
+							seqArr[i] = fmt.Sprintf("[%v>%v]", strings.ToUpper(seqArr[i]), bsatservice.GetComplement(snpCheck.Alt))
 						}
 					}
 				}

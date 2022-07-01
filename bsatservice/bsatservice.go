@@ -2,10 +2,15 @@ package bsatservice
 
 import (
 	"bsatoolMod/src/bsatstruct"
+	"bsatoolMod/src/codonPkg"
+	"bufio"
 	"github.com/360EntSecGroup-Skylar/excelize"
+	"github.com/pterm/pterm"
 	"log"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"strconv"
 
 	"fmt"
 	"github.com/mitchellh/hashstructure"
@@ -451,7 +456,14 @@ func PrintStatsInWeb(stat []bsatstruct.StatInfo, port string) {
 			</head>
 			<table width="100%" cellspacing="0" cellpadding="4" border="1">
 			<tbody>
-			<tr>			
+			<tr>			{{range $element := .}}
+			{{if eq .Perc 100}}				
+			<td>{{.Pos}}</td><td>{{.Count}}</td><td bgcolor="#ffe6e6">{{.Perc}}%</td><td>ALL FILES</td><td>NONE</td>
+			{{else if eq .Perc 5}}				
+			<td>{{.Pos}}</td><td>{{.Count}}</td><td bgcolor="#ddffcc">{{.Perc}}%</td><td>{{.FilesWith}}</td><td>{{.FilesWithout}}</td>
+			{{else}}
+			<td>{{.Pos}}</td><td>{{.Count}}</td><td>{{.Perc}}%</td><td>{{.FilesWith}}</td><td>{{.FilesWithout}}</td>
+			{{end}}
 			<td>Pos</td><td>Count</td><td>Percent</td><td>+</td><td>-</td>
 			</tr>
 			<tr>
@@ -573,6 +585,8 @@ func ExportToExcel(snps []bsatstruct.SnpInfo, file string) {
 }
 
 func MatrixPrint(headers strings.Builder, buffer strings.Builder, fileOut string) {
+	pterm.EnableDebugMessages()
+
 	if buffer.Len() != 0 && headers.Len() != 0 {
 		fOut, err := os.Create(fileOut)
 		if err != nil {
@@ -586,11 +600,13 @@ func MatrixPrint(headers strings.Builder, buffer strings.Builder, fileOut string
 		}(fOut)
 		_, _ = fmt.Fprintf(fOut, headers.String())
 		_, _ = fmt.Fprintf(fOut, buffer.String())
-		fmt.Printf("\n\nWell done!\n")
+
+		// fmt.Printf("\n\nWell done!\n")
+		pterm.Success.Printf("%v saved\n", fileOut)
 	}
 }
 
-func Openbrowser(url string) {
+func OpenBrowser(url string) {
 	var err error
 
 	switch runtime.GOOS {
@@ -609,7 +625,7 @@ func Openbrowser(url string) {
 
 }
 
-func PrintSequenceRange(rangeList []bsatstruct.RangePosInfo, web bool, port string, toCircos bool) {
+func PrintSeqRange(rangeList []bsatstruct.RangePosInfo, web bool, port string, toCircos bool) {
 	var basicAnnotation string
 	switch web {
 	case false:
@@ -691,7 +707,6 @@ func PrintSequenceRange(rangeList []bsatstruct.RangePosInfo, web bool, port stri
 
 		http.HandleFunc(
 			"/", func(w http.ResponseWriter, r *http.Request) {
-				// err = t.Execute(w, &gInfo)
 
 				err = tH.Execute(w, rangeList)
 				if err != nil {
@@ -702,12 +717,462 @@ func PrintSequenceRange(rangeList []bsatstruct.RangePosInfo, web bool, port stri
 				}()
 			})
 
-		// if *flgPort != 8080 {
 		locPort := fmt.Sprintf(":%v", port)
 		_ = http.ListenAndServe(locPort, nil)
-		// } else {
-		// 	http.ListenAndServe(":8080", nil)
-		// }
 
 	}
+}
+
+func GetNucFromGenome(start int, end int) string {
+	/*
+		возвращает последовательность нуклеотидов из генома:
+
+	*/
+	var (
+		result string
+		slice  []string
+	)
+	slice = bsatstruct.GenomeSequence[start:end]
+	result = strings.Join(slice, "")
+	return result
+}
+
+func GetNucFromGenomePos(pos int) string {
+	/*
+		возвращает последовательность нуклеотидов из генома:
+
+	*/
+	var (
+		result string
+		slice  []string
+	)
+	slice = bsatstruct.GenomeSequence[pos-1 : pos]
+	result = strings.Join(slice, "")
+	return result
+
+}
+
+func GetGeneNameByPos(start, end int) (string, int) {
+	var (
+		locName string
+		locLen  int
+	)
+	locLen = (end - start) + 1
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if start >= g.Start && end <= g.End {
+			locName = g.Locus
+
+		}
+
+	}
+	if locName == "" {
+		locName = "IGR"
+	}
+	return locName, locLen
+}
+
+func GetGeneNameCoordsByApos(pos int) (int, int) {
+	var (
+		gStart, gEnd int
+	)
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if pos >= g.Start && pos <= g.End {
+			gStart = g.Start
+			gEnd = g.End
+
+		}
+
+	}
+
+	return gStart, gEnd
+}
+
+func ChkPosExists(s []bsatstruct.AllPositionsInGene, pos int, alt string) bool {
+	for _, a := range s {
+		if a.Pos == pos && a.Alt == alt {
+			return true
+		}
+	}
+	return false
+}
+
+func GetDirectByName(locus string) string {
+	var direction string
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if strings.ToUpper(locus) == strings.ToUpper(g.Locus) {
+			direction = g.Direction
+
+			break
+		}
+	}
+
+	return direction
+}
+
+func GetProdByPos(start, end int) (string, string) {
+	var prod, note string
+
+	for _, g := range bsatstruct.FullGenesInfo {
+
+		if start >= g.Start && end <= g.End {
+
+			prod = g.Product
+			note = g.Note
+
+		}
+
+	}
+
+	return prod, note
+
+}
+
+func GetGenePosByName(locus string) (int, int) {
+	var start, end int
+
+	g := bsatstruct.GenePositions[locus]
+
+	if g.Start != 0 {
+		start = g.Start
+		end = g.End
+	}
+
+	return start, end
+}
+
+func GetProdByName(locus string) string {
+	var prod string
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if strings.ToUpper(locus) == strings.ToUpper(g.Locus) {
+			prod = g.Product
+			break
+		}
+	}
+
+	return prod
+}
+
+func GetListOfGenes() []string {
+	var (
+		allGenes []string
+	)
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		allGenes = append(allGenes, g.Locus)
+
+	}
+
+	return allGenes
+}
+
+func GetRangeFromFile(file string, verbose bool, noseq bool, genome string) []bsatstruct.RangePosInfo {
+	var (
+		rangeParser = regexp.MustCompile(`\b(\d+)\b\W+\b(\d+)\b`)
+
+		posRange, seq string
+		gc            float64
+		unsorted      []bsatstruct.RangeArray
+		result        []bsatstruct.RangePosInfo
+
+		j, k int
+	)
+
+	if genome == "" {
+		genome = bsatstruct.GenomeDescription.Strain
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(f)
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+
+		posRange = scanner.Text()
+
+		posRange = strings.Replace(posRange, ".", "", -1)
+
+		for _, val := range rangeParser.FindAllStringSubmatch(posRange, -1) {
+
+			if val[1] != "" && val[2] != "" {
+				startR, _ := strconv.Atoi(val[1])
+				endR, _ := strconv.Atoi(val[2])
+				if startR < endR {
+					bsatstruct.ResStart = startR
+					bsatstruct.ResEnd = endR
+				} else {
+					bsatstruct.ResStart = endR
+					bsatstruct.ResEnd = startR
+				}
+
+			}
+			if bsatstruct.ResStart != 0 && bsatstruct.ResEnd != 0 {
+
+				currRange := bsatstruct.RangeArray{Start: bsatstruct.ResStart, End: bsatstruct.ResEnd}
+				unsorted = append(unsorted, currRange)
+				j++
+				if verbose == true {
+					fmt.Printf("Processed %v ranges...\r", j)
+				}
+
+			}
+
+		}
+
+	}
+
+	sort.Slice(
+		unsorted, func(i, j int) bool {
+			return unsorted[i].Start < unsorted[j].Start
+		})
+
+	encountered := map[int]bool{}
+	doubles := map[int]int{}
+	var found []bsatstruct.RangeArray
+
+	for v := range unsorted {
+		if encountered[unsorted[v].Start+unsorted[v].End] == true {
+			// Do not add duplicate.
+			doubles[unsorted[v].Start+unsorted[v].End] = doubles[unsorted[v].Start+unsorted[v].End] + 1
+		} else {
+			// Record this element as an encountered element.
+			encountered[unsorted[v].Start+unsorted[v].End] = true
+			// Append to result slice.
+			found = append(found, unsorted[v])
+		}
+	}
+
+	for _, val := range found {
+		if noseq == true {
+			seq = ""
+		} else {
+			seq = GetNucFromGenome(val.Start-1, val.End)
+			if len(seq) > 3 {
+				gc, _, _, _ = codon.GcCodonCalc(seq)
+			}
+		}
+		gname, _ := GetGeneNameByPos(val.Start, val.End)
+		prod, note := GetProdByPos(val.Start, val.End)
+		fixedProd := strings.Replace(prod, " + ", " ", -1)
+		gcRes, _ := strconv.ParseFloat(fmt.Sprintf("%.2f", gc), 64)
+
+		res := bsatstruct.RangePosInfo{Start: val.Start, End: val.End, GeneName: gname, Prod: fixedProd, Len: val.End - val.Start + 1, Seq: seq,
+			Doubles: doubles[val.Start+val.End] + 1, Note: note, GC: gcRes, Genome: genome}
+
+		result = append(result, res)
+		k++
+		if verbose == true {
+			fmt.Printf("Annotated %v ranges from %v %v\r", k, len(found)-1, strings.Repeat(" ", 10))
+		}
+	}
+
+	return result
+}
+
+func GetGenomeMap() []bsatstruct.GenomeMapInfo {
+
+	var (
+		gmap    []bsatstruct.GenomeMapInfo
+		gmapval bsatstruct.GenomeMapInfo
+	)
+	for _, g := range bsatstruct.FullGenesInfo {
+		gmapval = bsatstruct.GenomeMapInfo{Start: g.Start, End: g.End, Locus: g.Locus, TypeOf: g.TypeOf, Product: g.Product}
+		gmap = append(gmap, gmapval)
+	}
+
+	return gmap
+}
+
+func GetGOAByName(locus string) string {
+	var goa string
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if strings.ToUpper(locus) == strings.ToUpper(g.Locus) {
+			goa = g.GOA
+			break
+		}
+	}
+
+	return goa
+}
+
+func GetInterGen(pos int) {
+	var (
+		igensS []int
+		igensE []int
+	)
+	for i, g := range bsatstruct.FullGenesInfo {
+
+		igensS = append(igensS, g.Start)
+		igensE = append(igensE, g.End)
+
+		if i >= 1 && i < len(bsatstruct.FullGenesInfo)-1 {
+
+			fmt.Printf("igen:s%v e:%v\n", igensS[i], igensE[i-1])
+		}
+		fmt.Printf("l:%v s:%v e:%v d:%v %v\n", g.Locus, g.Start, g.End, g.Direction, i)
+
+	}
+}
+
+func GetNoteByName(locus string) string {
+	var note string
+
+	for _, g := range bsatstruct.FullGenesInfo {
+		if strings.ToUpper(locus) == strings.ToUpper(g.Locus) {
+			note = g.Note
+			break
+		}
+	}
+
+	return note
+}
+
+// func GetCoordRange(start, end int) {
+//
+// 	var coordArray []int
+//
+// 	coordArray = append(coordArray, start)
+//
+// 	for i := start; i <= end; i++ {
+//
+// 		for _, g := range bsatstruct.FullGenesInfo {
+//
+// 			if g.Start == i {
+//
+// 				coordArray = append(coordArray, g.Start)
+//
+// 			} else if g.End == i {
+//
+// 				coordArray = append(coordArray, g.End)
+//
+// 			}
+//
+// 		}
+// 	}
+// 	coordArray = append(coordArray, end)
+// 	sort.Ints(coordArray)
+//
+// 	var res []bsatstruct.RangePosInfo
+//
+// 	for _, val := range coordArray {
+//
+// 		res = append(res, bsatseq.GetSeqRange(fmt.Sprintf("%v:%v", val, val), bsatstruct.Flag.GbNoSeq))
+//
+// 	}
+//
+// 	var last string
+// 	for _, val := range res {
+// 		if val.GeneName != last {
+// 			fmt.Println(val.GeneName, val.Prod)
+// 		}
+// 		last = val.GeneName
+//
+// 	}
+//
+// }
+
+func Nuc2IntCode(nuc string) string {
+
+	var (
+		locNuc = strings.ToUpper(nuc)
+		res    string
+	)
+
+	switch locNuc {
+
+	}
+
+	switch locNuc {
+
+	case "A":
+		res = "0"
+
+	case "T":
+		res = "1"
+	case "G":
+		res = "2"
+	case "C":
+
+		res = "3"
+	}
+	return res
+}
+
+func GetRevComplement(sequence string) string {
+
+	seqArr := strings.Split(sequence, "")
+
+	for i := 0; i < len(seqArr); i++ {
+		switch seqArr[i] {
+		case "a":
+			seqArr[i] = "t"
+		case "c":
+			seqArr[i] = "g"
+		case "t":
+			seqArr[i] = "a"
+		case "g":
+			seqArr[i] = "c"
+		case "A":
+			seqArr[i] = "T"
+		case "C":
+			seqArr[i] = "G"
+		case "T":
+			seqArr[i] = "A"
+		case "G":
+			seqArr[i] = "C"
+
+		}
+	}
+	complStr := strings.Join(seqArr, "")
+
+	runes := []rune(complStr)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+
+	return string(runes)
+
+}
+
+func GetComplement(sequence string) string {
+
+	seqArr := strings.Split(sequence, "")
+
+	for i := 0; i < len(seqArr); i++ {
+		switch seqArr[i] {
+		case "a":
+			seqArr[i] = "t"
+		case "c":
+			seqArr[i] = "g"
+		case "t":
+			seqArr[i] = "a"
+		case "g":
+			seqArr[i] = "c"
+		case "A":
+			seqArr[i] = "T"
+		case "C":
+			seqArr[i] = "G"
+		case "T":
+			seqArr[i] = "A"
+		case "G":
+			seqArr[i] = "C"
+
+		}
+	}
+	complStr := strings.Join(seqArr, "")
+
+	return complStr
+
 }

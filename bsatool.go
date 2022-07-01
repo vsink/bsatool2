@@ -5,6 +5,8 @@ import (
 	"bsatoolMod/src/bsatdb"
 	"bsatoolMod/src/bsatf"
 	"bsatoolMod/src/bsatseq"
+	"github.com/pterm/pterm"
+	"gopkg.in/alecthomas/kingpin.v2"
 
 	"bsatoolMod/src/bsatservice"
 	"bsatoolMod/src/bsatstruct"
@@ -27,34 +29,31 @@ import (
 	// "regexp"
 
 	"strings"
-
 	// "./amino"
 	// "./amino"
-
-	"gopkg.in/alecthomas/kingpin.v2"
 	// "html/template"
 	// "github.com/pkg/browser"
 )
 
 const (
-	logo = `
- _______    ________     __  ___________  ______      ______    ___       
-|   _  "\  /"       )   /""\("     _   ")/    " \    /    " \  |"  |      
-(. |_)  :)(:   \___/   /    \)__/  \\__/// ____  \  // ____  \ ||  |      
-|:     \/  \___  \    /' /\  \  \\_ /  /  /    ) :)/  /    ) :)|:  |      
-(|  _  \\   __/  \\  //  __'  \ |.  | (: (____/ //(: (____/ //  \  |___   
-|: |_)  :) /" \   :)/   /  \\  \\:  |  \        /  \        /  ( \_|:  \  
-(_______/ (_______/(___/    \___)\__|   \"_____/    \"_____/    \_______) 
-` +
-		`BSATool - Bacterial Snp Annotation Tool ` + "\n" +
-		`      Laboratory of Social and Epidemic Infections
- Scientific Centre for Family Health and Human Reproduction Problems
-     	(c) V.Sinkov, Irkutsk, Russia, 2017-2022                                   
-                                                  
-	`
-	// list   = "list"
-	// ncFlag = "NC"
-	// aaFlag = "AA"
+// 	logo = `
+//  _______    ________     __  ___________  ______      ______    ___
+// |   _  "\  /"       )   /""\("     _   ")/    " \    /    " \  |"  |
+// (. |_)  :)(:   \___/   /    \)__/  \\__/// ____  \  // ____  \ ||  |
+// |:     \/  \___  \    /' /\  \  \\_ /  /  /    ) :)/  /    ) :)|:  |
+// (|  _  \\   __/  \\  //  __'  \ |.  | (: (____/ //(: (____/ //  \  |___
+// |: |_)  :) /" \   :)/   /  \\  \\:  |  \        /  \        /  ( \_|:  \
+// (_______/ (_______/(___/    \___)\__|   \"_____/    \"_____/    \_______)
+// ` +
+// 		`BSATool - Bacterial Snp Annotation Tool ` + "\n" +
+// 		`      Laboratory of Social and Epidemic Infections
+//  Scientific Centre for Family Health and Human Reproduction Problems
+//      	(c) V.Sinkov, Irkutsk, Russia, 2017-2022
+//
+// 	`
+// list   = "list"
+// ncFlag = "NC"
+// aaFlag = "AA"
 )
 
 var (
@@ -63,6 +62,7 @@ var (
 	// Database flags
 	version string
 	build   string
+
 	// app       = kingpin.New(logo, "BSATool - Bacterial Snp Annotation Tool")
 	// appAuthor = app.Author("V.Sinkov")
 	// appVer    = app.Version(fmt.Sprintf("%v %v", version, build))
@@ -101,9 +101,10 @@ var (
 	annSeqLen        = annAction.Flag("len", "length of sequence").Int()
 	annShowFileName  = annAction.Flag("filename", "Show filename in first column for next analysis").Default("false").Bool()
 	annPosFile       = annAction.Flag("pos-file", "Create positions.txt file with information of each pos in sequence").String()
-	annMinPosNbr     = annAction.Flag("min-pos-nbr", "Set minimal threshhold of presence of position in sequence").Default("1").Int()
+	annMinPos        = annAction.Flag("min-pos", "Set minimal threshhold of presence of position in sequence").Default("1").Int()
+	annMaxPos        = annAction.Flag("max-pos", "Set maximal threshhold of presence of position in sequence").Int()
 	// annAltPosPercent     =annShowFileName annAction.Flag("alt-percent", "Maximal percent of presence of reference allele in sequence (99 default)").Default("1").Int()
-	annAltRange = annAction.Flag("alt-range", "Min-Max range values (percent) of presence alternative nucleotide in sequence").Default("1:99").String()
+	annAltRange = annAction.Flag("range", "Min-Max range values (percent) of presence alternative nucleotide in sequence").Default("10:90").String()
 	// annBench         = annAction.Flag("cpuprofile", "cpuprofile").String()
 
 	// compute statistic options
@@ -150,7 +151,9 @@ var (
 	// statMkSeq   = statAction.Flag("mkseq", "").Bool()
 	// statTH      = statAction.Flag("th", "").Int()
 
-	// filterAction = kingpin.Command("filter", "FilterVcfFILEs")
+	filterAction = kingpin.Command("filter", "FilterVcfFILEs")
+	dpMapAction  = kingpin.Command("dpmap", "DP mapping")
+	dpMapDB      = dpMapAction.Flag("db", "Name of database").Short('b').Required().String()
 	// filterDB     = filterAction.Flag("db", "Database file [Created by mkdb command]").Short('b').Required().String()
 
 	infoAction     = kingpin.Command("info", "Get information")
@@ -160,6 +163,7 @@ var (
 	infoCodons     = infoAction.Flag("codons", "Show sequence of codons [start:end]").String()
 	infoShowAs     = infoAction.Flag("showas", "Show as:direct (from left to right),gene(direction as in gene) ").String()
 	infoMask       = infoAction.Flag("mask", "pos:ref:alt").String()
+	infoReplace    = infoAction.Flag("replace", "pos:ref:alt").String()
 	infoFlankLeft  = infoAction.Flag("flank_left", "number of left nuclotides").Int()
 	infoFlankRight = infoAction.Flag("flank_right", "number of right nuclotides").Int()
 	infoIUPAc      = infoAction.Flag("iupac", "pos:ref:alt").Bool()
@@ -190,16 +194,28 @@ var (
 func main() {
 	// загружаем список vcf файлов
 	bsatstruct.ListOfFiles = bsatf.GetListVcf()
+	pterm.DefaultCenter.Println("\n")
+	s, _ := pterm.DefaultBigText.WithLetters(pterm.NewLettersFromString("BSATool")).Srender()
+	pterm.DefaultCenter.Println(s) // Print BigLetters with the default CenterPrinter
+	pterm.DefaultCenter.WithCenterEachLineSeparately().Println(
+		"-= BSATool - Bacterial Snp Annotation Tool =-\nThe Laboratory of Social and Epidemic Infections\nThe Group of Genomic Research and"+
+			" Bioinformatics\nScientific Centre for Family"+
+			" Health"+
+			" and Human"+
+			" Reproduction"+
+			" Problems\n(c) V.Sinkov, Irkutsk, Russia, 2017-2022\nVersion:", version)
+
 	// парсинг флагов
 	defer os.Exit(0)
+
 	// flag.Parse()
-	kingpin.New(logo, "BSATool - Bacterial Snp Annotation Tool")
+	// kingpin.New(logo, "BSATool - Bacterial Snp Annotation Tool")
 	kingpin.Version(fmt.Sprintf("%v %v", version, build)).Author("V.Sinkov")
 	kingpin.UsageTemplate(kingpin.LongHelpTemplate)
 
 	kingpin.Parse()
 	bsatstruct.Flag = bsatstruct.Flags{AnnSeqLen: *annSeqLen, AnnMakeSeqRef: *annMakeSeqRef, AnnBench: *annBench, AnnMakeSeq: *annMakeSeq,
-		AnnShowFileName: *annShowFileName, AnnDB: *annDB, AnnPosFile: *annPosFile, AnnAltRange: *annAltRange, AnnMinPosNbr: *annMinPosNbr,
+		AnnShowFileName: *annShowFileName, AnnDB: *annDB, AnnPosFile: *annPosFile, AnnAltRange: *annAltRange, AnnMinPos: *annMinPos,
 		AnnOutFormat: *annOutFormat, AnnVCF: *annVCF, AnnWithFilenames: *annWithFilenames, BetaDB: *betaDB, BetaInFile: *betaInFile, BetaTask: *betaTask,
 		GbIGR: *gbIGR, GbRandomize: *gbRandomize, GbIndex: *gbIndex, GbInDel: *gbInDel, GbDP: *gbDP, GbPort: *gbPort, GbDebug: *gbDebug, GbVerbose: *gbVerbose,
 		GbExcludeGenes: *gbExcludeGenes, GbExcludeRegions: *gbExcludeRegions, GbExcludeSnp: *gbExcludeRegions, GbNoSeq: *gbNoSeq, GbWeb: *gbWeb, GbXLSX: *gbXLSX,
@@ -213,7 +229,7 @@ func main() {
 		StatCircosBandColor: *statCircosBandColor, StatGenomeName: *statGenomeName, StatInFile: *statInFile, StatInFileList: *statInFileList,
 		StatGroupFromFile: *statGroupFromFile, StatLocus: *statLocus, StatOutFile: *statOutFile, StatMakeSeq: *statMakeSeq,
 		StatShowAnnotation: *statShowAnnotation, StatMkSeq: *statMkSeq, StatVCF: *statVCF, StatNbrOfSNP: *statNbrOfSNP, StatMinLocusCount: *statMinLocusCount,
-		DevPwd: *devPwd, DevTask: *devTask}
+		DevPwd: *devPwd, DevTask: *devTask, InfoReplace: *infoReplace, AnnMaxPos: *annMaxPos, Version: version}
 
 	switch kingpin.Parse() {
 
@@ -221,7 +237,7 @@ func main() {
 	case "mkdb":
 
 		if _, err := os.Stat(*dbGenbank); os.IsNotExist(err) {
-			fmt.Printf("The %v file is not exist!\n", *dbGenbank)
+			pterm.Error.Printf("The %v file is not exist!\n", *dbGenbank)
 			os.Exit(3)
 		}
 
@@ -297,20 +313,20 @@ func main() {
 		if *annVCF == "list" || *annVCF == "*" || *annVCF == "all" {
 			if *gbWeb == false && *annMakeSeq == "" {
 
-				bsatvcf.ParserBulkVCF(*annWithFilenames)
+				bsatseq.ParserBulkVCF(*annWithFilenames)
 				// go run bsatool.go annotate --vcf list --mkseq=NC  --db test_core
 
 			} else if *gbWeb == true && strings.ToUpper(*annMakeSeq) == "NC" {
-				bsatvcf.NucWebServer(*gbPort, exGenes, exSNPs)
+				bsatseq.NucWebServer(*gbPort, exGenes, exSNPs)
 			} else if *gbWeb == false && *annMakeSeq == "NC" && strings.ToUpper(*annOutFormat) != "NEXUS" {
-				// seq := MakeSeq(*annMakeSeq, *gbVerbose, *annMakeSeqRef)
+				// seq := MakeSeqFasta(*annMakeSeq, *gbVerbose, *annMakeSeqRef)
 
 				/* alt-range значит, что процент встречаемости альтернативного аллеля в последовательности будет в диапазоне --alt-range=10:80
 								go run bsatool.go annotate --vcf list --mkseq=NC  --db test_core --debug --alt-range=10:80
 				makeSeq
 				*/
 
-				seq := bsatvcf.MakeSeq(*annMakeSeq, *gbVerbose, *annMakeSeqRef, exGenes, exSNPs, *gbRandomize)
+				seq := bsatseq.MakeSeqFasta(*annMakeSeq, *gbVerbose, *annMakeSeqRef, exGenes, exSNPs, *gbRandomize)
 				// fmt.Println(len(seq))
 				for i := 0; i < len(seq); i++ {
 					fmt.Println(seq[i].Seq)
@@ -320,7 +336,7 @@ func main() {
 				}
 			} else if *gbWeb == false && strings.ToUpper(*annMakeSeq) != "BINARY" && strings.ToUpper(*annOutFormat) == "NEXUS" {
 				// fmt.Println(exGenes,exSNPs)
-				bsatvcf.MakeSeqNex(*annMakeSeq, *gbVerbose, *annMakeSeqRef, exGenes, exSNPs, *gbRandomize)
+				bsatseq.MakeSeqNex(*annMakeSeq, *gbVerbose, exGenes, exSNPs, *gbRandomize)
 
 			} else if *gbWeb == false && strings.ToUpper(*annMakeSeq) == "BINARY" {
 				// go run bsatool.go annotate --vcf list --mkseq=NC  --db test_core
@@ -328,19 +344,25 @@ func main() {
 				// go run  bsatool.go annotate --db test_core --vcf list --exclude-genes=ppe.genes --exclude-snp=drugs3.
 				// txt --mkseq=Binary --dp=30 --exclude-regions=exgenes.txt --min-pos-nbr=2 --output-format="nexus"
 
-				bsatvcf.MakeSeqBinary(*annMakeSeq, *gbVerbose, *annMakeSeqRef, exGenes, exSNPs, *gbRandomize, *gbDP)
+				bsatseq.MakeSeqBin(*annMakeSeq, *gbVerbose, exGenes, exSNPs, *gbRandomize, *gbDP)
 				// bsatool annotate --db sars --vcf list  --mkseq=Alignment --indel
 
 			} else if *gbWeb == false && strings.ToUpper(*annMakeSeq) == "ALIGNMENT" {
-				bsatvcf.MakeAlign(false, false)
+				bsatseq.MakeAlign(false)
 			}
 		} else {
 			// go run bsatool.go annotate --vcf 161_RuU_m.vcf  --db test_core -w
 
-			qSNP := &bsatvcf.VcfQuery{File: *annVCF, OutChan: make(chan bsatvcf.VcfInfoQuery)}
-			go qSNP.Request()
-			// snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
-			snpRes := <-qSNP.OutChan
+			// qSNP := &bsatvcf.VcfQuery{File: *annVCF, OutChan: make(chan bsatvcf.VcfInfoQuery)}
+			// go qSNP.Request()
+			// // snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
+			// snpRes := <-qSNP.OutChan
+			snpsChan := make(chan []bsatstruct.SnpInfo)
+
+			go func() {
+				snpsChan <- bsatvcf.GetSNPList(*annVCF)
+			}()
+			snpRes := <-snpsChan
 
 			if _, err := os.Stat(*annVCF); os.IsNotExist(err) {
 				fmt.Printf("The %v file is not exist!\n", *annVCF)
@@ -348,19 +370,19 @@ func main() {
 			}
 			if *gbWeb == false && *annMakeSeq == "" && *gbXLSX == "" {
 
-				for i := 0; i < len(snpRes.SnpInfo); i++ {
-					bsatservice.PrintInConsole(snpRes.SnpInfo[i], *gbIGR)
+				for i := 0; i < len(snpRes); i++ {
+					bsatservice.PrintInConsole(snpRes[i], *gbIGR)
 				}
 
 				// parserVCF(*annVCF, true, bsatstruct.FullGenesInfo)
 
 			} else if *gbWeb == true && *annMakeSeq == "" {
 				// snps := parserVCF(*annVCF, false, bsatstruct.FullGenesInfo)
-				bsatservice.PrintInWEB(snpRes.SnpInfo, *gbPort)
+				bsatservice.PrintInWEB(snpRes, *gbPort)
 			}
 			if *gbXLSX != "" {
 				// snps := parserVCF(*annVCF, false, bsatstruct.FullGenesInfo)
-				bsatservice.ExportToExcel(snpRes.SnpInfo, *gbXLSX)
+				bsatservice.ExportToExcel(snpRes, *gbXLSX)
 
 			}
 		}
@@ -443,16 +465,16 @@ func main() {
 
 			if *statInFile != "" {
 				file := *statInFile
-				res := bsatseq.GetRangeFromFile(file, *gbVerbose, *gbNoSeq, *statGenomeName)
+				res := bsatservice.GetRangeFromFile(file, *gbVerbose, *gbNoSeq, *statGenomeName)
 				if *statReverse == true {
 					for _, val := range res {
-						fmt.Println(bsatseq.MakeRevComplement(val.Seq))
+						fmt.Println(bsatservice.GetRevComplement(val.Seq))
 					}
 
-					bsatservice.PrintSequenceRange(res, *gbWeb, *gbPort, *statCircos)
+					bsatservice.PrintSeqRange(res, *gbWeb, *gbPort, *statCircos)
 				} else {
 
-					bsatservice.PrintSequenceRange(res, *gbWeb, *gbPort, *statCircos)
+					bsatservice.PrintSeqRange(res, *gbWeb, *gbPort, *statCircos)
 				}
 
 			}
@@ -514,18 +536,23 @@ func main() {
 					flist := bsatf.LoadFileNames(*statInFileList)
 					// fmt.Println(flist)
 					for _, file := range flist {
-						result := bsatvcf.Pos2Seq(*statInFile, file)
-						locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
-						fmt.Printf(">%v_%v(%v_%v)\n%v\n", locFile, result.Locus, result.Start, result.End, result.AltSeq)
+						if bsatseq.CheckVCFFormat(file) == true {
+							result := bsatseq.Pos2Seq(*statInFile, file)
+							locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
+							fmt.Printf(">%v_%v(%v_%v)\n%v\n", locFile, result.Locus, result.Start, result.End, result.AltSeq)
+						}
+
 						// fmt.Printf(">%v %v(%v:%v) %v\n%v\n", locFile, result.locus, result.start, result.end, result.prod, result.altSeq)
 
 					}
 				} else {
 
 					for _, file := range bsatstruct.ListOfFiles {
-						result := bsatvcf.Pos2Seq(*statInFile, file)
-						locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
-						fmt.Printf(">%v_%v(%v_%v)\n%v\n", locFile, result.Locus, result.Start, result.End, result.AltSeq)
+						if bsatseq.CheckVCFFormat(file) == true {
+							result := bsatseq.Pos2Seq(*statInFile, file)
+							locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
+							fmt.Printf(">%v_%v(%v_%v)\n%v\n", locFile, result.Locus, result.Start, result.End, result.AltSeq)
+						}
 						// fmt.Printf(">%v %v(%v:%v) %v\n%v\n", locFile, result.locus, result.start, result.end, result.prod, result.altSeq)
 					}
 				}
@@ -565,7 +592,7 @@ func main() {
 						flist := bsatf.LoadFileNames(*statInFile)
 						// fmt.Println(flist)
 						for _, file := range flist {
-							result := bsatvcf.Snp2SeqByLoc(*statLocus, file)
+							result := bsatseq.Snp2SeqByLoc(*statLocus, file)
 							locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
 							fmt.Printf(">%v\n%v\n", locFile, result.AltSeq)
 							// fmt.Printf(">%v %v(%v:%v) %v\n%v\n", locFile, result.locus, result.start, result.end, result.prod, result.altSeq)
@@ -573,7 +600,7 @@ func main() {
 						}
 					} else {
 						for _, file := range bsatstruct.ListOfFiles {
-							result := bsatvcf.Snp2SeqByLoc(*statLocus, file)
+							result := bsatseq.Snp2SeqByLoc(*statLocus, file)
 							locFile := strings.Replace(result.VcfFile, ".vcf", "", -1)
 							fmt.Printf(">%v\n%v\n", locFile, result.AltSeq)
 							// fmt.Printf(">%v_%v(%v_%v)\n%v\n", locFile, result.locus, result.start, result.end, result.altSeq)
@@ -583,7 +610,6 @@ func main() {
 					}
 
 				case "nc":
-
 					bsatcalc.Locus2Matrix(*statLocus, bsatstruct.ListOfFiles, "nc")
 				case "nc_coded":
 
@@ -631,12 +657,17 @@ func main() {
 		case "complex":
 
 			if *betaInFile != "" {
-				bsatf.CalcComplexIdxFromFile(*betaInFile)
+				bsatf.CalcCIdxFromFile(*betaInFile)
 			}
 		case "annotateFromList":
 			if len(*betaInFile) != 0 {
-				bsatf.AnnotateFromList(*betaInFile, bsatstruct.FullGenesInfo)
+				bsatf.AnnotFromFile(*betaInFile, bsatstruct.FullGenesInfo)
 			}
+		case "change":
+
+			// if *betaInFile != "" {
+			// bsatseq.MakeChangedSeq(2289241, 2288681, 2288681, "a", 10, 10)
+			// }
 
 		}
 
@@ -655,6 +686,12 @@ func main() {
 			for _, file := range bsatstruct.ListOfFiles {
 				bsatf.FilterVcf(file, *gbDP)
 			}
+		}
+	case "dpmap":
+		bsatdb.LoadDB(*dpMapDB)
+		allGenes := bsatservice.GetListOfGenes()
+		for _, file := range bsatstruct.ListOfFiles {
+			bsatf.DPmap(file, allGenes)
 		}
 
 	case "info":

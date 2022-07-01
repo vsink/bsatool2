@@ -10,6 +10,7 @@ import (
 	codon "bsatoolMod/src/codonPkg"
 	"bufio"
 	"fmt"
+	"github.com/pterm/pterm"
 	"github.com/xrash/smetrics"
 	"log"
 	"math/rand"
@@ -20,6 +21,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+)
+
+var (
+	spinner, _ = pterm.DefaultSpinner.Start("Analyzing...")
 )
 
 func CalcDnDs(vcfFile string) {
@@ -42,12 +47,12 @@ func CalcDnDs(vcfFile string) {
 	snpsChan := make(chan []bsatstruct.SnpInfo)
 
 	go func() {
-		snpsChan <- bsatvcf.MakeSnps(vcfFile)
+		snpsChan <- bsatvcf.GetSNPList(vcfFile)
 	}()
 	snps = <-snpsChan
 
 	for _, val := range snps {
-		if val.TypeOf == "CDS" && bsatseq.ChkPosExists(altPositions[val.Locus], val.PosInGene, val.Alt) == false {
+		if val.TypeOf == "CDS" && bsatservice.ChkPosExists(altPositions[val.Locus], val.PosInGene, val.Alt) == false {
 
 			altPositions[val.Locus] = append(
 				altPositions[val.Locus], bsatstruct.AllPositionsInGene{Pos: val.PosInGene, Alt: val.Alt, Ref: val.NucInPosCoding, Locus: val.Locus})
@@ -67,7 +72,7 @@ func CalcDnDs(vcfFile string) {
 
 			if ok {
 
-				fmt.Println(fmt.Sprintf("%v(%v)\t", allloc, bsatseq.GetProdByName(allloc)), dndsRes[1])
+				fmt.Println(fmt.Sprintf("%v(%v)\t", allloc, bsatservice.GetProdByName(allloc)), dndsRes[1])
 				close(dndsChan)
 			}
 
@@ -107,7 +112,7 @@ func CalcGC3Val(snps []bsatstruct.SnpInfo) []bsatstruct.GC3Type {
 
 		refS := bsatseq.GetGeneSeq(loc)
 
-		altS := bsatseq.MakeAltString(loc, altPositions[loc])
+		altS := bsatseq.MakeAltString(loc, altPositions[loc], false)
 
 		gcAlt, _, _, gc3Alt := codon.GcCodonCalc(altS)
 		gcRef, _, _, gc3Ref := codon.GcCodonCalc(refS)
@@ -132,11 +137,19 @@ func CalcJaroWinklerDist(file string, print bool) []bsatstruct.JaroWinklerInfo {
 	)
 
 	if len(bsatstruct.SnpCacheMap) == 0 {
-		qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
-		go qSNP.Request()
-
-		snpRes := <-qSNP.OutChan
-		bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
+		// go qSNP.Request()
+		//
+		// snpRes := <-qSNP.OutChan
+		// bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// snpsChan := make(chan []bsatstruct.SnpInfo)
+		//
+		// go func() {
+		// 	snpsChan <- bsatvcf.GetSNPList(file)
+		// }()
+		// snpsRes := <-snpsChan
+		snpsRes := bsatvcf.GetSNPList(file)
+		bsatstruct.SnpCacheMap[file] = snpsRes
 	}
 
 	for fname, snps := range bsatstruct.SnpCacheMap {
@@ -163,7 +176,7 @@ func CalcJaroWinklerDist(file string, print bool) []bsatstruct.JaroWinklerInfo {
 
 	for _, val := range validData {
 
-		altS := bsatseq.MakeAltString(val, altPositions[val])
+		altS := bsatseq.MakeAltString(val, altPositions[val], false)
 		altSequences = append(altSequences, altS)
 		refS := bsatseq.GetGeneSeq(val)
 
@@ -197,11 +210,19 @@ func MakeSNPStatistic() {
 
 		fmt.Printf("Reading: %v (%v from %v)%v \r", file, i+1, len(*files), strings.Repeat(" ", 60))
 
-		qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
-		go qSNP.Request()
-
-		snpRes := <-qSNP.OutChan
-		bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
+		// go qSNP.Request()
+		//
+		// snpRes := <-qSNP.OutChan
+		// bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// snpsChan := make(chan []bsatstruct.SnpInfo)
+		//
+		// go func() {
+		// 	snpsChan <- bsatvcf.GetSNPList(file)
+		// }()
+		// snpsRes := <-snpsChan
+		snpsRes := bsatvcf.GetSNPList(file)
+		bsatstruct.SnpCacheMap[file] = snpsRes
 	}
 
 	for fname, snps := range bsatstruct.SnpCacheMap {
@@ -774,15 +795,79 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		posCount   = make(map[int]int)
 	)
 
+	switch typeof {
+
+	case "binary":
+
+		pterm.Info.Printf("[BINARY MATRIX]\n")
+		// pterm.Info.Println("Selected binary matrix")
+
+	case "nc":
+
+		pterm.Info.Printf("[NC MATRIX]\n")
+		// pterm.Info.Println("nc matrix")
+
+	case "nc_coded":
+		pterm.Info.Printf("[NC_CODED MATRIX]\n")
+		// pterm.Info.Println("nc_coded matrix")
+	case "summary":
+		pterm.Info.Printf("[SUMMARY MATRIX]\n")
+		// pterm.Info.Println("summary matrix")
+
+	case "locus":
+
+		pterm.Info.Printf("[LOCUS MATRIX]\n")
+		// pterm.Info.Println("locus matrix")
+
+	case "freq":
+
+		pterm.Info.Printf("[FREQ MATRIX]\n")
+		// pterm.Info.Println("freq matrix")
+
+	case "dnds":
+
+		pterm.Info.Printf("[DN/DS MATRIX]\n")
+		// pterm.Info.Println("dn/ds matrix")
+	case "mst":
+		// stat --db test_core -a matrix -t mst -o test.tsv --exclude-genes=exgenes.txt --exclude-snp=drugs2.txt --snp-number=15
+
+		pterm.Info.Printf("[MST MATRIX]\n")
+		// pterm.Info.Println("Selected mst matrix")
+
+	case "jw":
+		// var dnds [][]DnDsRes
+
+		pterm.Info.Printf("[JW MATRIX]\n")
+		// pterm.Info.Println("jw matrix")
+	case "gc3":
+		// calcGC3Val
+
+		pterm.Info.Printf("[GC3 MATRIX]\n")
+		// pterm.Info.Println("gc3 matrix")
+	}
+
 	files := &bsatstruct.ListOfFiles
+	// pterm.Success.Printf("Found %v files\n", len(*files))
+
+	pterm.Info.Printf("Found %v files\n", len(*files))
+	spinner.RemoveWhenDone = true
+	// spinnerSuccess, _ := pterm.DefaultSpinner.Start("Analyzing...")
 
 	for i, file := range *files {
 		// создаем запрос в виде типа vcfQuery, который передается через канал на выход <-qSNP.OutChan
-		qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
-		go qSNP.Request()
-		// snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
-		snpRes := <-qSNP.OutChan
-		bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery)}
+		// go qSNP.Request()
+		// // snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
+		// snpRes := <-qSNP.OutChan
+		// bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// snpsChan := make(chan []bsatstruct.SnpInfo)
+		//
+		// go func() {
+		// 	snpsChan <- bsatvcf.GetSNPList(file)
+		// }()
+		// snpsRes := <-snpsChan
+		snpsRes := bsatvcf.GetSNPList(file)
+		bsatstruct.SnpCacheMap[file] = snpsRes
 		if verbose == true {
 			fmt.Printf("Reading files:  %v from %v \r", i+1, len(*files))
 		}
@@ -806,18 +891,33 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		exSNP = bsatf.LoadExclSNP(bsatstruct.Flag.GbExcludeSnp)
 	}
 
+	// spinnerText := fmt.Sprintf("Parsed: %v files\n", len(*files))
+	err := spinner.Stop()
+	if err != nil {
+		return
+	}
+	// spinner.UpdateText(spinnerText)
+
+	// spinnerSuccess.Success() // Resolve spinner with success message.
+
 	switch typeof {
 
 	case "binary":
-
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating binary matrix...")
+		spinner.RemoveWhenDone = true
 		MatrixBinary(fileOut, exGenes, exSNP)
-
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	// case "table":
 
 	// 	matrixTable(fileOut)
 
 	case "nc":
 		var posFreq = map[int][]string{}
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating nc matrix...")
+		spinner.RemoveWhenDone = true
 		pos := make(map[int]string)
 
 		headers.WriteString("Pos\tRef\t")
@@ -848,7 +948,7 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 					// fmt.Println(posFreq[allpos])
 
 				} else {
-					posFreq[allpos] = append(posFreq[allpos], bsatseq.GetNucFromGenomePos(allpos))
+					posFreq[allpos] = append(posFreq[allpos], bsatservice.GetNucFromGenomePos(allpos))
 
 				}
 
@@ -861,18 +961,24 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 		for _, allpos := range AllPos {
 			// if buffer.Len() == 0 {
-			buffer.WriteString(fmt.Sprintln(allpos, "\t", bsatseq.GetNucFromGenomePos(allpos), "\t", strings.Join(posFreq[allpos], "\t")))
+			buffer.WriteString(fmt.Sprintln(allpos, "\t", bsatservice.GetNucFromGenomePos(allpos), "\t", strings.Join(posFreq[allpos], "\t")))
 			// fmt.Println(buffer.String())
 
 		}
 		headers.WriteString("\n")
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "nc_coded":
 		// A, T, G,C, ---> 0, 1, 2, 3
 		var posFreq = map[int][]string{}
 		pos := make(map[int]string)
 		posCount := make(map[int]int)
 		files := &bsatstruct.ListOfFiles
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating nc_coded matrix...")
+		spinner.RemoveWhenDone = true
 		headers.WriteString("Pos\t")
 		// allPosChan := make(chan []int)
 		// go func() {
@@ -898,11 +1004,11 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 				if pos[allpos] != "" {
 
-					posFreq[allpos] = append(posFreq[allpos], fmt.Sprintf("%v", bsatseq.Nuc2IntCode(pos[allpos])))
+					posFreq[allpos] = append(posFreq[allpos], fmt.Sprintf("%v", bsatservice.Nuc2IntCode(pos[allpos])))
 					// fmt.Println(posFreq[allpos])
 
 				} else {
-					posFreq[allpos] = append(posFreq[allpos], bsatseq.Nuc2IntCode(bsatseq.GetNucFromGenomePos(allpos)))
+					posFreq[allpos] = append(posFreq[allpos], bsatservice.Nuc2IntCode(bsatservice.GetNucFromGenomePos(allpos)))
 
 				}
 
@@ -923,7 +1029,10 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		}
 		headers.WriteString("\n")
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
-
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "summary":
 		var (
 			posFreq = map[int][]string{}
@@ -938,7 +1047,8 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 			PosAdditionalInfo      = make(map[int]string)
 			genomes                []string
 		)
-
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating summary matrix...")
+		spinner.RemoveWhenDone = true
 		if bsatstruct.Flag.StatGroupFromFile != "" {
 			f, err := os.Open(bsatstruct.Flag.StatGroupFromFile) // открываем файл
 
@@ -1082,7 +1192,7 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 		for _, allpos := range AllPos {
 			// if buffer.Len() == 0 {
-			gname, _ := bsatseq.GetGeneNameByPos(allpos, allpos)
+			gname, _ := bsatservice.GetGeneNameByPos(allpos, allpos)
 			if len(group) != 0 {
 				sort.Strings(fileGroup[allpos])
 				uniq := bsatservice.RmStrDoubles(fileGroup[allpos])
@@ -1121,13 +1231,18 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		// t1 := time.Now()
 		// fmt.Printf("Elapsed time: %v", fmtDuration(t1.Sub(t0)))
 		// }
-
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "locus":
 		var (
 			i          int
 			locFreq    = map[string][]string{}
 			locusCount = make(map[string]int)
 		)
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating locus matrix...")
+		spinner.RemoveWhenDone = true
 		headers.WriteString("Locus\t")
 
 		// for i, file := range files {
@@ -1166,8 +1281,14 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 		headers.WriteString("\n")
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 
 	case "freq":
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating freq matrix...")
+		spinner.RemoveWhenDone = true
 		headers.WriteString("Pos\tFreq\n")
 		AllPos = bsatseq.GetAllPositions(exGenes, exSNP)
 		for _, snps := range bsatstruct.SnpCacheMap {
@@ -1187,15 +1308,29 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		}
 
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
-
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "dnds":
+		// pterm.Info.Println("dn/ds matrix")
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating dn/ds matrix...")
+		spinner.RemoveWhenDone = true
 		MatrixDnDs(fileOut)
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "mst":
 		// stat --db test_core -a matrix -t mst -o test.tsv --exclude-genes=exgenes.txt --exclude-snp=drugs2.txt --snp-number=15
 		var (
 			exGenes = make(map[int]int)
 			exSNP   = make(map[int]int)
 		)
+		// pterm.Info.Println("Selected mst matrix")
+		// spinnerSuccess, _ := pterm.DefaultSpinner.Start("Calculating MST matrix...")
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating mst matrix...")
+		spinner.RemoveWhenDone = true
 		if bsatstruct.Flag.GbExcludeGenes != "" {
 			exGenes = bsatf.LoadExclGenes(bsatstruct.Flag.GbExcludeGenes)
 		} else if bsatstruct.Flag.GbExcludeSnp != "" {
@@ -1203,13 +1338,22 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 		}
 
 		MatrixBinaryMST(fileOut, bsatstruct.Flag.GbVerbose, exGenes, exSNP, bsatstruct.Flag.GbRandomize)
-
+		// spinnerSuccess.Text = "Calculating MST matrix finished"
+		// spinnerSuccess.Success()
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "jw":
 		// var dnds [][]DnDsRes
 		var (
 			locJW = map[string][]string{}
 			i     int
 		)
+
+		// spinnerSuccess, _ := pterm.DefaultSpinner.Start("Calculating Jaro Winkler distance...")
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating Jaro Winkler distance...")
+		spinner.RemoveWhenDone = true
 		headers.WriteString("Locus\t")
 
 		// for i, file := range files {
@@ -1217,8 +1361,8 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 			i++
 			headers.WriteString(fmt.Sprintf("%v\t", strings.TrimSuffix(fname, filepath.Ext(fname))))
 
-			fmt.Printf("Calculating Jaro Winkler distance: Working on %v from %v (%v) \r", i, len(*files), fname)
-
+			// fmt.Printf("Calculating Jaro Winkler distance: Working on %v from %v (%v) \r", i, len(*files), fname)
+			spinner.UpdateText("Calcualting Jaro Winkler distance for " + fname)
 			jw := CalcJaroWinklerDist(fname, bsatstruct.Flag.GbVerbose)
 
 			for _, jwVal := range jw {
@@ -1243,7 +1387,12 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 		headers.WriteString("\n")
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
-
+		// spinnerSuccess.Text = "Calculating Jaro Winkler finished"
+		// spinnerSuccess.Success()
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 	case "gc3":
 		// calcGC3Val
 
@@ -1252,6 +1401,8 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 			refGC3 = map[string]string{}
 			i      int
 		)
+		spinner, _ = pterm.DefaultSpinner.Start("Calculating gc3 matrix...")
+		spinner.RemoveWhenDone = true
 		headers.WriteString("Locus\tRefCG3\t")
 
 		// for i, file := range files {
@@ -1293,6 +1444,10 @@ func MakeMatrix(typeof string, fileOut string, verbose bool) {
 
 		headers.WriteString("\n")
 		bsatservice.MatrixPrint(headers, buffer, fileOut)
+		err := spinner.Stop()
+		if err != nil {
+			return
+		}
 
 	}
 
@@ -1441,11 +1596,19 @@ func MatrixBinaryMST(fileOut string, verbose bool, exGenes map[int]int, exSNPs m
 	files := &bsatstruct.ListOfFiles
 	for i, file := range *files {
 		// создаем запрос в виде типа vcfQuery, который передается через канал на выход <-qSNP.OutChan
-		qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery), Print: verbose}
-		go qSNP.Request()
-		// snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
-		snpRes := <-qSNP.OutChan
-		bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// qSNP := &bsatvcf.VcfQuery{File: file, OutChan: make(chan bsatvcf.VcfInfoQuery), Print: verbose}
+		// go qSNP.Request()
+		// // snpCacheFromChan = append(snpCacheFromChan, <-qSNP.OutChan)
+		// snpRes := <-qSNP.OutChan
+		// bsatstruct.SnpCacheMap[snpRes.File] = snpRes.SnpInfo
+		// snpsChan := make(chan []bsatstruct.SnpInfo)
+		//
+		// go func() {
+		// 	snpsChan <- bsatvcf.GetSNPList(file)
+		// }()
+		// snpsRes := <-snpsChan
+		snpsRes := bsatvcf.GetSNPList(file)
+		bsatstruct.SnpCacheMap[file] = snpsRes
 		if verbose == true {
 			fmt.Printf("Reading files:  %v from %v \r", i+1, len(*files))
 		}
@@ -1635,9 +1798,9 @@ func MatrixDnDs(fileOut string) {
 		fileGroup              = make(map[string][]string)
 		fileLabel              = make(map[string][]string)
 		dndsPerGenomeAll       = make(map[string]map[string]string)
-		t0                     = time.Now()
-		th                     int
-		dndsFloat              float64
+		// t0                     = time.Now()
+		th        int
+		dndsFloat float64
 	)
 
 	if bsatstruct.Flag.StatDnDsCountTh != 0 {
@@ -1701,7 +1864,12 @@ func MatrixDnDs(fileOut string) {
 
 	}
 	// fmt.Println(geneCoordinates)
+
 	for fname, snps := range bsatstruct.SnpCacheMap {
+		// Create and start a fork of the default spinner.
+
+		// time.Sleep(time.Second * 2) // Simulate 3 seconds of processing something.
+
 		// t0 = time.Now()
 		// locInGenome[fname] = make(map[string]string)
 		// headers.WriteString(fmt.Sprintf("%v\t", strings.TrimSuffix(key, filepath.Ext(key))))
@@ -1710,11 +1878,11 @@ func MatrixDnDs(fileOut string) {
 
 		// genomes = append(genomes, fname)
 
-		fmt.Printf("Gathering information: Working on %v from %v (%v)\r", i, len(*files), fname)
+		// fmt.Printf("Gathering information: Working on %v from %v (%v)\r", i, len(*files), fname)
 		altPositionsPerFile[fname] = make(map[string][]bsatstruct.AllPositionsInGene)
 		for _, val := range snps {
 
-			if val.TypeOf == "CDS" && bsatseq.ChkPosExists(altPositionsPerFile[fname][val.Locus], val.PosInGene, val.Alt) == false {
+			if val.TypeOf == "CDS" && bsatservice.ChkPosExists(altPositionsPerFile[fname][val.Locus], val.PosInGene, val.Alt) == false {
 
 				// altPositions[val.Locus] = append(altPositions[val.Locus], allPositionsInGene{pos: val.PosInGene, alt: val.Alt, ref: val.NucInPosCoding, locus: val.Locus})
 				altPositionsPerFile[fname][val.Locus] = append(
@@ -1727,11 +1895,25 @@ func MatrixDnDs(fileOut string) {
 	}
 	// fmt.Println(altPositionsPerFile)
 	// dndsPerGenomeAll = make(map[string]string)
+
+	// p, _ := pterm.DefaultProgressbar.WithTotal(len(*files)).WithTitle("Calculating DN/DS:").Start()
+	// spinnerSuccess, _ := pterm.DefaultSpinner.Start("Calculating DN/DS...")
+
+	// for i := 0; i < p.Total; i++ {
+	// 	p.UpdateTitle("Downloading " + fakeInstallList[i])         // Update the title of the progressbar.
+	// 	pterm.Success.Println("Downloading " + fakeInstallList[i]) // If a progressbar is running, each print will be printed above the progressbar.
+	// 	p.Increment()                                              // Increment the progressbar by one. Use Add(x int) to increment by a custom amount.
+	// 	time.Sleep(time.Millisecond * 350)                         // Sleep 350 milliseconds.
+	// }
 	usedLocuses = bsatservice.RmStrDoubles(usedLocusesUnsort)
 	for _, fname := range *files {
+		spinner.UpdateText("Calcualting dN/dS for " + fname)
+		// workTitle := fmt.Sprintf("Working on: %v \t\t Time:\t%v\n", fname, time.Since(t0))
+		// p.UpdateTitle(workTitle) // Update the title of the progressbar.
+		// p.Increment()            // Increment the progressbar by one. Use Add(x int) to increment by a custom amount.
 		dndsPerGenomeAll[fname] = make(map[string]string)
 		geneDnDs[fname] = map[string]string{}
-		t1 := time.Now()
+		// t1 := time.Now()
 		for _, allloc := range allLocuses {
 
 			// prod := getProductByName(allloc)
@@ -1792,9 +1974,6 @@ func MatrixDnDs(fileOut string) {
 
 		}
 
-		// if *gbVerbose == true {
-		fmt.Printf("Calculating DN/DS: Working on %v from %v (%v) \t\t Time:\t%v\n", i, len(*files), fname, t1.Sub(t0))
-		// }
 		i++
 		// fmt.Println(locInGenome)
 		// fmt.Println(len(altPositions))
@@ -1806,9 +1985,11 @@ func MatrixDnDs(fileOut string) {
 	if bsatstruct.Flag.GbDebug == true {
 		fmt.Println("Used locuses:", usedLocuses, "Total:", len(usedLocuses))
 	}
-
+	// spinnerSuccess.Success() // Resolve spinner with success message.
+	// pM, _ := pterm.DefaultProgressbar.WithTotal(len(*files)).WithTitle("Calculating matrix:").Start()
+	// p, _ = pterm.DefaultProgressbar.WithTotal(len(*files)).WithTitle("Calculating matrix:").Start()
 	for _, gname := range *files {
-		t1 := time.Now()
+		// t1 := time.Now()
 		for i := 0; i < len(usedLocuses); i++ {
 			// for j := 0; j < len(dndsPerGenomeAll); j++ {
 			// if dndsPerGenomeAll[gname] == usedLocuses[i] {
@@ -1827,13 +2008,20 @@ func MatrixDnDs(fileOut string) {
 		// 		}
 		// 	}
 		// }
+		// workTitle := fmt.Sprintf("%v \t\t Time:\t%v\n", gname, t1.Sub(t0))
+		// p.UpdateTitle(workTitle) // Update the title of the progressbar.
+		// pterm.Success.Println("Calculating Dn/Ds :" + fmt.Sprintf("[%v/%v]", i, len(*files))) // If a progressbar is running,
+		// each print will be printed above the progressbar.
+		// p.Increment() // Increment the progressbar by one. Use Add(x int) to increment by a custom amount.
+		// fmt.Printf("Calculating matrix: Working on %v from %v (%v) \t\t Time:\t%v\n", i, len(*files), gname, t1.Sub(t0))
 
-		fmt.Printf("Making matrix: Working on %v from %v (%v) \t\t Time:\t%v\n", i, len(*files), gname, t1.Sub(t0))
 		i++
 	}
 
 	i = 1
-
+	// style := pterm.NewStyle(pterm.BgLightGreen, pterm.FgWhite, pterm.Bold)
+	// style.Println("This text uses a style and is bold and light green with a red background!")
+	pterm.Success.Println("Matrix created!")
 	for _, gname := range *files {
 		// t1 := time.Now()
 		headers.WriteString(fmt.Sprintf("%v\t", gname))
@@ -1868,7 +2056,7 @@ func MatrixDnDs(fileOut string) {
 
 	for _, allloc := range usedLocuses {
 
-		prod := bsatseq.GetProdByName(allloc)
+		prod := bsatservice.GetProdByName(allloc)
 
 		if bsatstruct.Flag.StatAll == true {
 			buffer.WriteString(fmt.Sprintln(allloc, groupBody, prod, "\t", strings.Join(dndsPerLocus[allloc], "\t"), "\t"))
@@ -2045,11 +2233,11 @@ func Locus2Matrix(locus string, listOfFiles []string, typeof string) {
 	// exGenes[exGene[0]] = 1
 	// exGenes[start] = end
 	for _, file := range bsatstruct.ListOfFiles {
-		start, end = bsatseq.GetGenePosByName(locus)
+		start, end = bsatservice.GetGenePosByName(locus)
 		// prod, _ = getProductByPos(start, end)
-		altPostitions = bsatvcf.GetAltPos(start, end, file)
+		altPostitions = bsatseq.GetAltPosFromFile(start, end, file)
 		// fmt.Println(altPostitions)
-		altseq = bsatseq.MakeAltString(locus, altPostitions)
+		altseq = bsatseq.MakeAltString(locus, altPostitions, false)
 		locmatrix = strings.Split(altseq, "")
 		// fmt.Println(locmatrix)
 
@@ -2063,7 +2251,7 @@ func Locus2Matrix(locus string, listOfFiles []string, typeof string) {
 			}
 		case "nc_coded":
 			for i, val := range locmatrix {
-				locPosLetter[i] = append(locPosLetter[i], bsatseq.Nuc2IntCode(val))
+				locPosLetter[i] = append(locPosLetter[i], bsatservice.Nuc2IntCode(val))
 
 			}
 		case "binary":
@@ -2105,7 +2293,7 @@ func GetDnDsByLocus(locus string, altPositions []bsatstruct.AllPositionsInGene) 
 	)
 
 	refS := bsatseq.GetGeneSeq(locus)
-	altS := bsatseq.MakeAltString(locus, altPositions) // fmt.Println(val, "\n", refS)
+	altS := bsatseq.MakeAltString(locus, altPositions, false) // fmt.Println(val, "\n", refS)
 
 	qDnDs := &codon.DnDsQuery{RefSeq: refS, AltSeq: altS, OutChan: make(chan codon.DnDs)}
 	go qDnDs.Request()
